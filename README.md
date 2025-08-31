@@ -4,6 +4,8 @@ An organic, fluid, and evolving **creative coding** sketch built with [p5.js](ht
 The visuals use **Perlin-noise flow fields** and thousands of particles to generate liquid-like, smoke-like trails that are continuously evolving — never static.  
 Control the flow with sliders or a MIDI controller, and randomize seeds for infinite variations.
 
+<img width="1919" height="932" alt="Screenshot 2025-08-31 161314" src="https://github.com/user-attachments/assets/2c4a2c29-4912-41af-bd5f-38f271c354e8" />
+
 ---
 
 ## ✨ Features
