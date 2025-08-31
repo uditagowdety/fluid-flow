@@ -1,0 +1,444 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Fluid Flow — p5.js</title>
+    <style>
+        :root {
+            --bg: #0a0a0a;
+            --fg: #eaeaea;
+            --muted: #9aa0a6;
+        }
+
+        html,
+        body {
+            margin: 0;
+            padding: 0;
+            background: var(--bg);
+            color: var(--fg);
+            font-family: ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, "Helvetica Neue", Arial, "Apple Color Emoji", "Segoe UI Emoji";
+        }
+
+        .wrap {
+            display: grid;
+            grid-template-columns: 320px 1fr;
+            min-height: 100vh;
+        }
+
+        .panel {
+            padding: 16px;
+            border-right: 1px solid #1f1f1f;
+            background: #0c0c0c;
+        }
+
+        h1 {
+            font-size: 18px;
+            margin: 0 0 8px;
+            font-weight: 600;
+        }
+
+        p {
+            font-size: 13px;
+            line-height: 1.4;
+            color: var(--muted);
+        }
+
+        .row {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            margin: 10px 0 16px;
+        }
+
+        .row label {
+            width: 120px;
+            font-size: 12px;
+            color: #c7c7c7;
+        }
+
+        .row input[type=range] {
+            width: 100%;
+        }
+
+        .hint {
+            font-size: 12px;
+            color: #b7b7b7;
+            margin-top: 8px;
+        }
+
+        .kbd {
+            font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
+            background: #171717;
+            border: 1px solid #2a2a2a;
+            padding: 1px 6px;
+            border-radius: 6px;
+        }
+
+        .mini {
+            font-size: 11px;
+            color: #a8a8a8;
+        }
+
+        canvas {
+            display: block;
+            width: 100% !important;
+            height: 100vh !important;
+        }
+
+        .stat {
+            font-variant-numeric: tabular-nums;
+            font-size: 12px;
+            color: #9aa0a6;
+        }
+
+        .btn {
+            display: inline-block;
+            padding: 6px 10px;
+            border: 1px solid #2a2a2a;
+            border-radius: 8px;
+            background: #121212;
+            color: #eaeaea;
+            font-size: 12px;
+            cursor: pointer;
+        }
+
+        .btn:active {
+            transform: translateY(1px);
+        }
+    </style>
+    <!-- p5.js CDN -->
+    <script src="https://cdn.jsdelivr.net/npm/p5@1.9.4/lib/p5.min.js"></script>
+</head>
+
+<body>
+    <div class="wrap">
+        <aside class="panel">
+            <h1>Fluid Flow — p5.js</h1>
+            <p>Organic, evolving flow‑fields with Perlin noise. Tweak with sliders or a MIDI controller.
+                <br><span class="mini">Press <span class="kbd">R</span> to randomize seed. Press <span
+                        class="kbd">S</span> to save a frame.</span>
+            </p>
+
+            <div class="row">
+                <label for="hue">Hue / Shift</label>
+                <input id="hue" type="range" min="0" max="360" step="1" value="200">
+                <span id="hueVal" class="stat">200°</span>
+            </div>
+
+            <div class="row">
+                <label for="speed">Flow Speed</label>
+                <input id="speed" type="range" min="0" max="100" step="1" value="35">
+                <span id="speedVal" class="stat">0.35</span>
+            </div>
+
+            <div class="row">
+                <label for="dist">Distortion</label>
+                <input id="dist" type="range" min="0" max="100" step="1" value="40">
+                <span id="distVal" class="stat">0.40</span>
+            </div>
+
+            <div class="row">
+                <label for="sym">Symmetry</label>
+                <input id="sym" type="range" min="1" max="12" step="1" value="6">
+                <span id="symVal" class="stat">×6</span>
+            </div>
+
+            <div class="row">
+                <button id="reseeder" class="btn">Randomize Seed (R)</button>
+                <button id="clear" class="btn">Soft Clear</button>
+            </div>
+
+            <p class="hint">MIDI: If your browser supports Web MIDI, CC <strong>1</strong>→Hue,
+                <strong>2</strong>→Speed, <strong>3</strong>→Distortion, <strong>4</strong>→Symmetry.
+                <br>Plug in a controller, move a knob once to latch.
+            </p>
+
+            <p class="mini">Built to be extended: clean modules for <em>Controller</em>, <em>Flow</em>, and
+                <em>Particles</em>. Add audio‑reactivity by modulating params in <code>update()</code>.
+            </p>
+        </aside>
+        <main id="sketch"></main>
+    </div>
+
+    <script>
+        // ==========================
+        // CONFIG & STATE
+        // ==========================
+        const CFG = {
+            particleCount: 1400,   // Tune for performance
+            step: 0.8,             // Particle step length (base)
+            fieldScale: 0.0022,    // Noise field spatial scale
+            trailFade: 8,          // Background fade alpha (higher = faster fade)
+            strokeAlpha: 10,       // Particle stroke alpha (0–255)
+            seed: Math.floor(Math.random() * 1e9),
+        };
+
+        let controller, flow, system, pg;
+
+        // ==========================
+        // CONTROLLER: sliders + MIDI
+        // ==========================
+        class Controller {
+            constructor() {
+                // DOM inputs
+                this.ui = {
+                    hue: document.querySelector('#hue'),
+                    speed: document.querySelector('#speed'),
+                    dist: document.querySelector('#dist'),
+                    sym: document.querySelector('#sym'),
+                    hueVal: document.querySelector('#hueVal'),
+                    speedVal: document.querySelector('#speedVal'),
+                    distVal: document.querySelector('#distVal'),
+                    symVal: document.querySelector('#symVal'),
+                    reseeder: document.querySelector('#reseeder'),
+                    clear: document.querySelector('#clear'),
+                };
+
+                // Parameter model (normalized where helpful)
+                this.params = {
+                    hue: parseFloat(this.ui.hue.value),             // 0..360
+                    speed: this._map01(this.ui.speed.value / 100),  // 0..1 → 0..1
+                    dist: this._map01(this.ui.dist.value / 100),    // 0..1
+                    symmetry: parseInt(this.ui.sym.value),          // 1..12
+                };
+
+                this._bindDOM();
+                this._tryMIDI();
+                this._renderLabels();
+            }
+
+            _bindDOM() {
+                this.ui.hue.addEventListener('input', () => { this.params.hue = parseFloat(this.ui.hue.value); this._renderLabels(); });
+                this.ui.speed.addEventListener('input', () => { this.params.speed = this._map01(this.ui.speed.value / 100); this._renderLabels(); });
+                this.ui.dist.addEventListener('input', () => { this.params.dist = this._map01(this.ui.dist.value / 100); this._renderLabels(); });
+                this.ui.sym.addEventListener('input', () => { this.params.symmetry = parseInt(this.ui.sym.value); this._renderLabels(); });
+                this.ui.reseeder.addEventListener('click', () => randomizeSeed());
+                this.ui.clear.addEventListener('click', () => softClear());
+            }
+
+            // Web MIDI (optional)
+            _tryMIDI() {
+                if (!navigator.requestMIDIAccess) return;
+                navigator.requestMIDIAccess({ sysex: false }).then(access => {
+                    for (const input of access.inputs.values()) {
+                        input.onmidimessage = (e) => this._onMIDI(e);
+                    }
+                    access.onstatechange = () => {
+                        // Re‑attach on new devices
+                        for (const input of access.inputs.values()) {
+                            input.onmidimessage = (e) => this._onMIDI(e);
+                        }
+                    };
+                }).catch(() => { });
+            }
+
+            _onMIDI(e) {
+                const [status, data1, data2] = e.data; // status, CC#, value
+                const isCC = (status & 0xF0) === 0xB0;
+                if (!isCC) return;
+                const v = data2 / 127; // 0..1
+                switch (data1) {
+                    case 1:   // Mod wheel → Hue
+                        this.params.hue = Math.floor(v * 360);
+                        this.ui.hue.value = this.params.hue;
+                        break;
+                    case 2:   // CC2 → Speed
+                        this.params.speed = v; this.ui.speed.value = Math.floor(v * 100);
+                        break;
+                    case 3:   // CC3 → Distortion
+                        this.params.dist = v; this.ui.dist.value = Math.floor(v * 100);
+                        break;
+                    case 4:   // CC4 → Symmetry
+                        this.params.symmetry = 1 + Math.floor(v * 11); // 1..12
+                        this.ui.sym.value = this.params.symmetry;
+                        break;
+                    default:
+                        return;
+                }
+                this._renderLabels();
+            }
+
+            _renderLabels() {
+                this.ui.hueVal.textContent = `${this.params.hue.toFixed(0)}°`;
+                this.ui.speedVal.textContent = `${(this.params.speed).toFixed(2)}`;
+                this.ui.distVal.textContent = `${(this.params.dist).toFixed(2)}`;
+                this.ui.symVal.textContent = `×${this.params.symmetry}`;
+            }
+
+            _map01(x) { return Math.max(0, Math.min(1, x)); }
+        }
+
+        // ==========================
+        // FLOW FIELD
+        // ==========================
+        class Flow {
+            constructor() {
+                this.z = 0; // time axis for evolving noise
+                this.evolveSpeed = 0.0035; // base z‑evolution; multiplied by speed knob
+            }
+
+            angleAt(x, y) {
+                // Distortion increases multi‑octave turbulence and spatial scale
+                const d = controller.params.dist; // 0..1
+                const baseScale = CFG.fieldScale * (1.0 + d * 2.0);
+                const nx = x * baseScale;
+                const ny = y * baseScale;
+
+                // Two octaves of noise to get richer flow
+                const n1 = noise(nx, ny, this.z);
+                const n2 = noise(nx * 2.13 + 100, ny * 2.07 - 55, this.z * 0.6);
+                const n = lerp(n1, n2, 0.55 + d * 0.3);
+                // Map noise → angle; add subtle curl with sine warp
+                const theta = n * TWO_PI * 2.0 + sin(n * PI * 2.0) * 0.3 * d;
+                return theta;
+            }
+
+            update() {
+                // z evolves with speed knob; keep it small for smoothness
+                const s = 0.2 + controller.params.speed * 2.0; // 0.2..2.2 multiplier
+                this.z += this.evolveSpeed * s;
+            }
+        }
+
+        // ==========================
+        // PARTICLE SYSTEM
+        // ==========================
+        class Particle {
+            constructor(w, h) {
+                this.reset(w, h);
+            }
+            reset(w, h) {
+                this.pos = createVector(random(w), random(h));
+                this.prev = this.pos.copy();
+                this.speed = CFG.step * (0.5 + random(1.2));
+            }
+            step(flow) {
+                const a = flow.angleAt(this.pos.x, this.pos.y);
+                const v = p5.Vector.fromAngle(a);
+                this.prev.set(this.pos);
+                // Speed scales with knob
+                const sMul = 0.4 + controller.params.speed * 2.1;
+                this.pos.add(v.mult(this.speed * sMul));
+
+                // Wrap around edges (toroidal)
+                if (this.pos.x < 0) this.pos.x += width;
+                if (this.pos.y < 0) this.pos.y += height;
+                if (this.pos.x >= width) this.pos.x -= width;
+                if (this.pos.y >= height) this.pos.y -= height;
+
+                // Occasionally respawn to avoid clumping
+                if (random() < 0.0005) this.reset(width, height);
+            }
+            draw(g) {
+                g.line(this.prev.x, this.prev.y, this.pos.x, this.pos.y);
+            }
+        }
+
+        class ParticleSystem {
+            constructor(count) {
+                this.p = Array.from({ length: count }, () => new Particle(width, height));
+            }
+            update(flow) { this.p.forEach(pt => pt.step(flow)); }
+            draw(g) { this.p.forEach(pt => pt.draw(g)); }
+        }
+
+        // ==========================
+        // P5: SETUP/DRAW
+        // ==========================
+        function setup() {
+            const cnv = createCanvas(window.innerWidth - 320, window.innerHeight);
+            cnv.parent('sketch');
+            colorMode(HSB, 360, 100, 100, 100);
+            pixelDensity(Math.min(2, window.devicePixelRatio || 1));
+
+            controller = new Controller();
+            noiseSeed(CFG.seed);
+            randomSeed(CFG.seed);
+
+            // Offscreen buffer for silky trails
+            pg = createGraphics(width, height);
+            pg.colorMode(HSB, 360, 100, 100, 100);
+            pg.strokeWeight(1);
+
+            flow = new Flow();
+            system = new ParticleSystem(CFG.particleCount);
+
+            softClear(true);
+        }
+
+        function windowResized() {
+            resizeCanvas(window.innerWidth - 320, window.innerHeight);
+            const newPg = createGraphics(width, height);
+            newPg.colorMode(HSB, 360, 100, 100, 100);
+            newPg.image(pg, 0, 0, width, height); // keep old trails when resizing
+            pg = newPg;
+        }
+
+        function draw() {
+            // Fade the previous frame for liquid trails
+            pg.noStroke();
+            pg.fill(0, 0, 0, CFG.trailFade);
+            pg.rect(0, 0, width, height);
+
+            // Stroke color: evolving hue with knob shift
+            const t = (millis() * 0.00005) % 1.0; // slow drift
+            const baseHue = (controller.params.hue + t * 90) % 360; // drift + knob shift
+            const sat = 65 + sin(frameCount * 0.005) * 15;
+            const bri = 90;
+
+            pg.stroke(baseHue, sat, bri, CFG.strokeAlpha);
+
+            // Update flow + particles
+            flow.update();
+            system.update(flow);
+
+            // Symmetry rendering: rotate around center N times
+            const N = controller.params.symmetry; // 1..12
+            const angleStep = TWO_PI / N;
+            pg.push();
+            pg.translate(width / 2, height / 2);
+
+            // Draw the particle paths in each sector by transforming space
+            for (let i = 0; i < N; i++) {
+                pg.push();
+                pg.rotate(i * angleStep);
+                pg.translate(-width / 2, -height / 2);
+                system.draw(pg);
+                pg.pop();
+            }
+            pg.pop();
+
+            // Composite
+            image(pg, 0, 0);
+        }
+
+        // ==========================
+        // UTILITIES & CONTROLS
+        // ==========================
+        function randomizeSeed() {
+            CFG.seed = Math.floor(Math.random() * 1e9);
+            noiseSeed(CFG.seed);
+            randomSeed(CFG.seed);
+            softClear(true);
+        }
+
+        function softClear(hard = false) {
+            // Hard clear paints the buffer; otherwise gently fade more
+            pg.push();
+            pg.blendMode(BLEND);
+            pg.noStroke();
+            pg.fill(0, 0, 0, hard ? 100 : 20);
+            pg.rect(0, 0, width, height);
+            pg.pop();
+        }
+
+        function keyPressed() {
+            if (key === 'r' || key === 'R') randomizeSeed();
+            if (key === 's' || key === 'S') saveCanvas('fluid-flow', 'png');
+        }
+    </script>
+</body>
+
+</html>
